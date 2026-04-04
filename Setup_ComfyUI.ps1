@@ -20,6 +20,52 @@ function Read-NumberSelection {
     }
 }
 
+function Read-ValidWindowsFolderName {
+    param(
+        [string]$Prompt,
+        [string]$DefaultValue = "ComfyUI"
+    )
+
+    $invalidChars = [System.IO.Path]::GetInvalidFileNameChars()
+    $reservedNamePattern = '^(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$'
+
+    while ($true) {
+        $rawInput = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($rawInput)) {
+            return $DefaultValue
+        }
+
+        $folderName = $rawInput.Trim()
+
+        if ($folderName -eq "." -or $folderName -eq "..") {
+            Write-Host "[!] Invalid folder name. '.' and '..' are not allowed." -ForegroundColor Yellow
+            continue
+        }
+
+        if ($folderName.EndsWith(" ") -or $folderName.EndsWith(".")) {
+            Write-Host "[!] Invalid folder name. It cannot end with a space or period." -ForegroundColor Yellow
+            continue
+        }
+
+        if ($folderName.Length -gt 255) {
+            Write-Host "[!] Invalid folder name. Maximum length is 255 characters." -ForegroundColor Yellow
+            continue
+        }
+
+        if ($folderName.IndexOfAny($invalidChars) -ge 0) {
+            Write-Host "[!] Invalid folder name. It contains characters not allowed on Windows." -ForegroundColor Yellow
+            continue
+        }
+
+        if ($folderName -match $reservedNamePattern) {
+            Write-Host "[!] Invalid folder name. Reserved Windows names are not allowed (e.g. CON, PRN, AUX, NUL, COM1-9, LPT1-9)." -ForegroundColor Yellow
+            continue
+        }
+
+        return $folderName
+    }
+}
+
 function Exit-UnsupportedCuda {
     param(
         [string]$Reason
@@ -30,6 +76,7 @@ function Exit-UnsupportedCuda {
     exit 1
 }
 
+Write-Host "=== Easy ComfyUI Setup v1.0.1 ===" -ForegroundColor Cyan
 Write-Host "--- Part 1: Detecting CUDA Version ---" -ForegroundColor Cyan
 
 if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
@@ -139,8 +186,11 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
 Refresh-PathEnvironment
 
 Write-Host "--- Part 3: Cloning Repository ---" -ForegroundColor Cyan
-if (Test-Path ".\ComfyUI") {
-    Write-Host "[X] '.\ComfyUI' already exists. Remove or rename it before running this script." -ForegroundColor Red
+$comfyUiFolderName = Read-ValidWindowsFolderName -Prompt "Enter destination folder name for ComfyUI (leave blank for 'ComfyUI')"
+$comfyUiFolderPath = Join-Path -Path "." -ChildPath $comfyUiFolderName
+
+if (Test-Path $comfyUiFolderPath) {
+    Write-Host "[X] '$comfyUiFolderPath' already exists. Remove or rename it before running this script." -ForegroundColor Red
     exit 1
 }
 
@@ -149,7 +199,7 @@ $versionInput = Read-Host "Enter ComfyUI version tag (e.g. 0.0.2 or v0.18.3). Le
 $versionInput = $versionInput.Trim()
 
 if ([string]::IsNullOrWhiteSpace($versionInput)) {
-    git clone $repoUrl
+    git clone $repoUrl $comfyUiFolderName
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[X] Failed to clone repository." -ForegroundColor Red
         exit 1
@@ -174,14 +224,14 @@ if ([string]::IsNullOrWhiteSpace($versionInput)) {
         exit 1
     }
 
-    git clone --branch $targetTag --single-branch $repoUrl
+    git clone --branch $targetTag --single-branch $repoUrl $comfyUiFolderName
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[X] Failed to clone repository at tag '$targetTag'." -ForegroundColor Red
         exit 1
     }
 }
 
-Set-Location -Path ".\ComfyUI"
+Set-Location -Path $comfyUiFolderPath
 
 Write-Host "--- Part 4: Setting Up Virtual Environment ---" -ForegroundColor Cyan
 uv venv --python 3.12
@@ -243,8 +293,6 @@ if ($installFlashAttention) {
 $defaultAttentionArg = ""
 if ($flashAttentionInstalled -or $sageAttentionInstalled) {
     Write-Host "--- Part 8: Selecting Default Attention Backend ---" -ForegroundColor Cyan
-    Write-Host "[i] SageAttention can be manually enabled per workflow by using ComfyUI-KJNodes's Patch Sage Attention KJ node." -ForegroundColor Yellow
-    Write-Host "[i] It is recommended to use PyTorch attention by default." -ForegroundColor Yellow
 
     $attentionChoices = @(
         [PSCustomObject]@{
@@ -263,6 +311,9 @@ if ($flashAttentionInstalled -or $sageAttentionInstalled) {
     }
 
     if ($sageAttentionInstalled) {
+		Write-Host "[i] SageAttention can be manually enabled per workflow by using ComfyUI-KJNodes's Patch Sage Attention KJ node." -ForegroundColor Yellow
+		Write-Host "[i] It is recommended to use PyTorch attention by default and patch SageAttention when you need it" -ForegroundColor Yellow
+		
         $attentionChoices += [PSCustomObject]@{
             Key = ($attentionChoices.Count + 1).ToString()
             Label = "SageAttention"
@@ -473,4 +524,4 @@ exit /b 1
 $reinstallTorchCudaTritonSageAttnFlashAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn_flashattn.bat" -Encoding ascii
 
 Write-Host "--- Setup Complete! ---" -ForegroundColor Green
-Write-Host "All scripts (start.bat, update_latest.bat, update_stable.bat, switch_comfyui_version.bat, reinstall_torchcuda_triton_sageattn_flashattn.bat) have been created in the ComfyUI folder. Run start.bat to start ComfyUI."
+Write-Host "All scripts (start.bat, update_latest.bat, update_stable.bat, switch_comfyui_version.bat, reinstall_torchcuda_triton_sageattn_flashattn.bat) have been created in the '$comfyUiFolderName' folder. Run start.bat to start ComfyUI."

@@ -79,8 +79,3 @@ If CUDA is not detected or not supported, installation will not proceed.
 | `update_stable.bat` | Checks out latest `v*` tag, then reinstalls requirements. |
 | `switch_comfyui_version.bat` | Prompts for a version tag and switches ComfyUI to that tag, then reinstalls requirements. |
 | `reinstall_torchcuda_triton_sageattn_flashattn.bat` | Re-detects CUDA and force-reinstalls Torch/Triton/attention packages. |
-
-## Notes
-
-- The script creates a `ComfyUI` directory in the repo root.
-- If `.\ComfyUI` already exists, setup exits to avoid overwriting.
