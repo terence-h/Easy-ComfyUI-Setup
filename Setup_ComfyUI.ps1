@@ -76,7 +76,7 @@ function Exit-UnsupportedCuda {
     exit 1
 }
 
-Write-Host "=== Easy ComfyUI Setup v1.0.1 ===" -ForegroundColor Cyan
+Write-Host "=== Easy ComfyUI Setup v1.0.2 ===" -ForegroundColor Cyan
 Write-Host "--- Part 1: Detecting CUDA Version ---" -ForegroundColor Cyan
 
 if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
@@ -522,6 +522,138 @@ pause
 exit /b 1
 "@
 $reinstallTorchCudaTritonSageAttnFlashAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn_flashattn.bat" -Encoding ascii
+
+Write-Host "[√] All scripts created successfully." -ForegroundColor Green
+
+Write-Host "--- Part 10: Optional Shared Model Search Path ---" -ForegroundColor Cyan
+Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared model directory so installs can reuse one model library and avoid duplicate models." -ForegroundColor Yellow
+
+$extraModelPathsConfigured = $false
+$extraModelBasePath = $null
+$invalidPathChars = [System.IO.Path]::GetInvalidPathChars()
+
+while ($true) {
+    $extraModelPathInput = Read-Host "Enter extra model search path (e.g. C:\ComfyUI_Models). Leave blank to skip"
+    if ([string]::IsNullOrWhiteSpace($extraModelPathInput)) {
+        break
+    }
+
+    $candidatePath = $extraModelPathInput.Trim()
+
+    if ($candidatePath.IndexOfAny($invalidPathChars) -ge 0) {
+        Write-Host "[!] Invalid directory path. Enter a valid absolute Windows path or leave blank to skip." -ForegroundColor Yellow
+        continue
+    }
+
+    if (-not ($candidatePath -match '^[a-zA-Z]:\\' -or $candidatePath.StartsWith("\\"))) {
+        Write-Host "[!] Please enter an absolute Windows path (for example C:\ComfyUI_Models)." -ForegroundColor Yellow
+        continue
+    }
+
+    if ((Test-Path -Path $candidatePath) -and -not (Test-Path -Path $candidatePath -PathType Container)) {
+        Write-Host "[!] '$candidatePath' exists but is not a directory." -ForegroundColor Yellow
+        continue
+    }
+
+    $extraModelBasePath = $candidatePath
+    break
+}
+
+if (-not [string]::IsNullOrWhiteSpace($extraModelBasePath)) {
+    $requiredExtraModelSubfolders = @(
+        "checkpoints",
+        "text_encoders",
+        "clip",
+        "clip_vision",
+        "configs",
+        "controlnet",
+        "diffusers",
+        "diffusion_models",
+        "unet",
+        "embeddings",
+        "gligen",
+        "hypernetworks",
+        "ipadapter",
+        "latent_upscale_models",
+        "loras",
+        "model_patches",
+        "photomaker",
+        "style_models",
+        "upscale_models",
+        "vae",
+        "vae_approx",
+        "audio_encoders",
+        "LLM",
+        "onnx",
+        "sams",
+        "ultralytics",
+        "ultralytics\bbox",
+        "ultralytics\segm"
+    )
+
+    New-Item -Path $extraModelBasePath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    if (-not (Test-Path -Path $extraModelBasePath -PathType Container)) {
+        Write-Host "[X] Failed to create or access '$extraModelBasePath'." -ForegroundColor Red
+        exit 1
+    }
+
+    foreach ($relativeSubfolder in $requiredExtraModelSubfolders) {
+        $targetSubfolderPath = Join-Path -Path $extraModelBasePath -ChildPath $relativeSubfolder
+        New-Item -Path $targetSubfolderPath -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        if (-not (Test-Path -Path $targetSubfolderPath -PathType Container)) {
+            Write-Host "[X] Failed to create required model directory '$targetSubfolderPath'." -ForegroundColor Red
+            exit 1
+        }
+    }
+
+    $resolvedExtraModelBasePath = (Resolve-Path -Path $extraModelBasePath).Path
+    $yamlBasePath = $resolvedExtraModelBasePath -replace "'", "''"
+    $extraModelPathsYamlContent = @"
+comfyui:
+    base_path: '$yamlBasePath'
+    is_default: true
+    checkpoints: checkpoints
+    text_encoders: |
+        text_encoders
+        clip
+    clip_vision: clip_vision
+    configs: configs
+    controlnet: controlnet
+    diffusers: diffusers
+    diffusion_models: |
+        diffusion_models
+        unet
+    embeddings: embeddings
+    gligen: gligen
+    hypernetworks: hypernetworks
+    ipadapter: ipadapter
+    latent_upscale_models: latent_upscale_models
+    loras: loras
+    model_patches: model_patches
+    photomaker: photomaker
+    style_models: style_models
+    upscale_models: upscale_models
+    vae: vae
+    vae_approx: vae_approx
+    audio_encoders: audio_encoders
+    LLM: LLM
+    onnx: onnx
+    sams: sams
+    ultralytics: ultralytics
+    ultralytics_bbox: ultralytics/bbox
+    ultralytics_segm: ultralytics/segm
+"@
+    $extraModelPathsYamlContent | Out-File -FilePath "extra_model_paths.yaml" -Encoding ascii
+    if (-not (Test-Path -Path "extra_model_paths.yaml" -PathType Leaf)) {
+        Write-Host "[X] Failed to create extra_model_paths.yaml in '$comfyUiFolderName'." -ForegroundColor Red
+        exit 1
+    }
+
+    $extraModelPathsConfigured = $true
+    Write-Host "[√] Created extra_model_paths.yaml using shared model path '$resolvedExtraModelBasePath'." -ForegroundColor Green
+} else {
+    Write-Host "[i] Skipped extra model search path setup."
+}
 
 Write-Host "--- Setup Complete! ---" -ForegroundColor Green
 Write-Host "All scripts (start.bat, update_latest.bat, update_stable.bat, switch_comfyui_version.bat, reinstall_torchcuda_triton_sageattn_flashattn.bat) have been created in the '$comfyUiFolderName' folder. Run start.bat to start ComfyUI."

@@ -25,6 +25,11 @@ The script handles CUDA-aware dependency installation, environment setup, and cr
 - Installs attention backends based on CUDA support:
   - SageAttention 2 (CUDA 12.8 / 13.x)
   - FlashAttention 2 (CUDA 13.x)
+- Optional shared model path setup:
+  - Prompts for an extra model search path (leave blank to skip)
+  - Creates `extra_model_paths.yaml` in the cloned ComfyUI root
+  - Creates the required model subfolders under that shared directory
+  - Recommended for multiple ComfyUI installs to avoid duplicate model files
 - Generates scripts inside the `ComfyUI` folder:
   - `start.bat`
   - `update_latest.bat`
@@ -65,10 +70,21 @@ If CUDA is not detected or not supported, installation will not proceed.
    - Install missing prerequisites (if needed)
    - Choose ComfyUI version tag (or leave blank for latest)
    - Select default attention backend (if available)
+   - Optionally set an extra model search path (recommended for multiple ComfyUI installations)
 6. After setup completes, go to the generated `ComfyUI` folder and start:
    ```powershell
    .\start.bat
    ```
+
+## Optional Shared Model Search Path
+
+If you provide a shared model directory (for example `C:\ComfyUI_Models`), the setup script will:
+
+1. Create the root folder if it does not exist.
+2. Create all required model subfolders referenced by ComfyUI's extra-model-path config.
+3. Generate `extra_model_paths.yaml` in the cloned ComfyUI root with your path as `base_path`.
+
+Leave the prompt blank to skip this step.
 
 ## Generated Batch Scripts
 
