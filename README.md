@@ -25,6 +25,10 @@ The script handles CUDA-aware dependency installation, environment setup, and cr
 - Installs attention backends based on CUDA support:
   - SageAttention 2 (CUDA 12.8 / 13.x)
   - FlashAttention 2 (CUDA 13.x)
+- Optional `start.bat` launch argument setup:
+  - Disable dynamic VRAM (`--disable-dynamic-vram`)
+  - Custom output directory (`--output-directory "..."`)
+  - Custom input directory (`--input-directory "..."`)
 - Optional shared model path setup:
   - Prompts for an extra model search path (leave blank to skip)
   - Creates `extra_model_paths.yaml` in the cloned ComfyUI root
@@ -67,10 +71,12 @@ If CUDA is not detected or not supported, installation will not proceed.
    .\Setup_ComfyUI.ps1
    ```
 5. Follow prompts:
-   - Install missing prerequisites (if needed)
-   - Choose ComfyUI version tag (or leave blank for latest)
-   - Select default attention backend (if available)
-   - Optionally set an extra model search path (recommended for multiple ComfyUI installations)
+    - Install missing prerequisites (if needed)
+    - Choose ComfyUI version tag (or leave blank for latest)
+    - Select default attention backend (if available)
+    - Optionally disable dynamic VRAM in `start.bat` (Y/N, default N)
+    - Optionally set custom output/input directories for `start.bat` (absolute Windows paths, leave blank to keep defaults)
+    - Optionally set an extra model search path (recommended for multiple ComfyUI installations)
 6. After setup completes, go to the generated `ComfyUI` folder and start:
    ```powershell
    .\start.bat
@@ -90,7 +96,7 @@ Leave the prompt blank to skip this step.
 
 | Script | Purpose |
 | --- | --- |
-| `start.bat` | Activates `.venv` and launches ComfyUI with `--enable-manager` and selected attention argument. |
+| `start.bat` | Activates `.venv` and launches ComfyUI with `--enable-manager`, selected attention argument, and any optional launch arguments chosen during setup (`--disable-dynamic-vram`, `--output-directory`, `--input-directory`). |
 | `update_latest.bat` | Pulls latest from `origin master`, then reinstalls requirements. |
 | `update_stable.bat` | Checks out latest `v*` tag, then reinstalls requirements. |
 | `switch_comfyui_version.bat` | Prompts for a version tag and switches ComfyUI to that tag, then reinstalls requirements. |

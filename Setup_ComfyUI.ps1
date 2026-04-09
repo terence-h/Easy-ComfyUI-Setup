@@ -66,6 +66,40 @@ function Read-ValidWindowsFolderName {
     }
 }
 
+function Read-OptionalAbsoluteWindowsPath {
+    param(
+        [string]$Prompt
+    )
+
+    $invalidPathChars = [System.IO.Path]::GetInvalidPathChars()
+
+    while ($true) {
+        $rawInput = Read-Host $Prompt
+        if ([string]::IsNullOrWhiteSpace($rawInput)) {
+            return $null
+        }
+
+        $candidatePath = $rawInput.Trim()
+
+        if ($candidatePath.IndexOfAny($invalidPathChars) -ge 0) {
+            Write-Host "[!] Invalid directory path. Enter a valid absolute Windows path or leave blank to skip." -ForegroundColor Yellow
+            continue
+        }
+
+        if (-not ($candidatePath -match '^[a-zA-Z]:\\' -or $candidatePath.StartsWith("\\"))) {
+            Write-Host "[!] Please enter an absolute Windows path (for example C:\ComfyUI_Models)." -ForegroundColor Yellow
+            continue
+        }
+
+        if ((Test-Path -Path $candidatePath) -and -not (Test-Path -Path $candidatePath -PathType Container)) {
+            Write-Host "[!] '$candidatePath' exists but is not a directory." -ForegroundColor Yellow
+            continue
+        }
+
+        return $candidatePath
+    }
+}
+
 function Exit-UnsupportedCuda {
     param(
         [string]$Reason
@@ -76,7 +110,7 @@ function Exit-UnsupportedCuda {
     exit 1
 }
 
-Write-Host "=== Easy ComfyUI Setup v1.0.2 ===" -ForegroundColor Cyan
+Write-Host "=== Easy ComfyUI Setup v1.0.3 ===" -ForegroundColor Cyan
 Write-Host "--- Part 1: Detecting CUDA Version ---" -ForegroundColor Cyan
 
 if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
@@ -128,7 +162,7 @@ if ($detectedCudaVersion -eq "12.6") {
 Write-Host "--- Part 2: Checking/Installing Prerequisites ---" -ForegroundColor Cyan
 
 if (Get-Command git -ErrorAction SilentlyContinue) {
-    Write-Host "[√] Git is already installed." -ForegroundColor Green
+    Write-Host "[✓] Git is already installed." -ForegroundColor Green
 } else {
     Write-Host "[!] Git was not found." -ForegroundColor Yellow
     Write-Host "1. Yes - install Git via Winget"
@@ -148,7 +182,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
             exit 1
         }
 
-        Write-Host "[√] Git installed successfully." -ForegroundColor Green
+        Write-Host "[✓] Git installed successfully." -ForegroundColor Green
     } else {
         Write-Host "[X] You chose not to install Git. Setup will exit." -ForegroundColor Red
         exit 1
@@ -156,7 +190,7 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 }
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {
-    Write-Host "[√] uv is already installed." -ForegroundColor Green
+    Write-Host "[✓] uv is already installed." -ForegroundColor Green
 } else {
     Write-Host "[!] uv was not found." -ForegroundColor Yellow
     Write-Host "1. Yes - install uv via Winget"
@@ -176,7 +210,7 @@ if (Get-Command uv -ErrorAction SilentlyContinue) {
             exit 1
         }
 
-        Write-Host "[√] uv installed successfully." -ForegroundColor Green
+        Write-Host "[✓] uv installed successfully." -ForegroundColor Green
     } else {
         Write-Host "[X] You chose not to install uv. Setup will exit." -ForegroundColor Red
         exit 1
@@ -331,9 +365,43 @@ if ($flashAttentionInstalled -or $sageAttentionInstalled) {
     $defaultAttentionArg = $selectedAttention.Arg
 }
 
-$startCommandAttentionArg = ""
+$disableDynamicVram = $false
+while ($true) {
+    $disableDynamicVramInput = (Read-Host "Disable dynamic VRAM? Enter Y or N (default N)").Trim()
+    if ([string]::IsNullOrWhiteSpace($disableDynamicVramInput) -or $disableDynamicVramInput.Equals("N", [System.StringComparison]::OrdinalIgnoreCase)) {
+        break
+    }
+
+    if ($disableDynamicVramInput.Equals("Y", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $disableDynamicVram = $true
+        break
+    }
+
+    Write-Host "[!] Invalid choice. Enter Y or N." -ForegroundColor Yellow
+}
+
+Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared output directory so installs can save generated output at a centralised location." -ForegroundColor Yellow
+$outputDirectoryArgPath = Read-OptionalAbsoluteWindowsPath -Prompt "Enter output directory for generated items (e.g. D:\ComfyUI_Output). Leave blank to keep default"
+Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared input directory so installs can access all the uploaded files." -ForegroundColor Yellow
+$inputDirectoryArgPath = Read-OptionalAbsoluteWindowsPath -Prompt "Enter input directory for input items (images, videos, audio, etc.) (e.g. D:\ComfyUI_Input). Leave blank to keep default"
+
+$startCommandArgsList = @()
 if (-not [string]::IsNullOrWhiteSpace($defaultAttentionArg)) {
-    $startCommandAttentionArg = " $defaultAttentionArg"
+    $startCommandArgsList += $defaultAttentionArg
+}
+if ($disableDynamicVram) {
+    $startCommandArgsList += "--disable-dynamic-vram"
+}
+if (-not [string]::IsNullOrWhiteSpace($outputDirectoryArgPath)) {
+    $startCommandArgsList += ('--output-directory "{0}"' -f $outputDirectoryArgPath)
+}
+if (-not [string]::IsNullOrWhiteSpace($inputDirectoryArgPath)) {
+    $startCommandArgsList += ('--input-directory "{0}"' -f $inputDirectoryArgPath)
+}
+
+$startCommandArgs = ""
+if ($startCommandArgsList.Count -gt 0) {
+    $startCommandArgs = " " + ($startCommandArgsList -join " ")
 }
 
 Write-Host "--- Part 9: Creating Launch & Update Batch Files ---" -ForegroundColor Cyan
@@ -344,10 +412,13 @@ $startContent = @"
 setlocal
 cd /d %~dp0
 call .venv\Scripts\activate.bat
-python main.py --enable-manager $startCommandAttentionArg
+python main.py --enable-manager $startCommandArgs
 REM --output-directory "D:\ComfyUI_Output"
+REM --input-directory "D:\ComfyUI_Input"
 REM --use-sage-attention
 REM --use-flash-attention
+REM --disable-dynamic-vram
+REM --front-end-version Comfy-Org/ComfyUI_frontend@1.39.19
 "@
 $startContent | Out-File -FilePath "start.bat" -Encoding ascii
 
@@ -512,7 +583,7 @@ if "!INSTALL_FLASH!"=="1" (
     if errorlevel 1 goto :install_failed
 )
 
-echo [√] Reinstall completed.
+echo [✓] Reinstall completed.
 pause
 exit /b 0
 
@@ -523,41 +594,13 @@ exit /b 1
 "@
 $reinstallTorchCudaTritonSageAttnFlashAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn_flashattn.bat" -Encoding ascii
 
-Write-Host "[√] All scripts created successfully." -ForegroundColor Green
+Write-Host "[✓] All scripts created successfully." -ForegroundColor Green
 
 Write-Host "--- Part 10: Optional Shared Model Search Path ---" -ForegroundColor Cyan
 Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared model directory so installs can reuse one model library and avoid duplicate models." -ForegroundColor Yellow
 
 $extraModelPathsConfigured = $false
-$extraModelBasePath = $null
-$invalidPathChars = [System.IO.Path]::GetInvalidPathChars()
-
-while ($true) {
-    $extraModelPathInput = Read-Host "Enter extra model search path (e.g. C:\ComfyUI_Models). Leave blank to skip"
-    if ([string]::IsNullOrWhiteSpace($extraModelPathInput)) {
-        break
-    }
-
-    $candidatePath = $extraModelPathInput.Trim()
-
-    if ($candidatePath.IndexOfAny($invalidPathChars) -ge 0) {
-        Write-Host "[!] Invalid directory path. Enter a valid absolute Windows path or leave blank to skip." -ForegroundColor Yellow
-        continue
-    }
-
-    if (-not ($candidatePath -match '^[a-zA-Z]:\\' -or $candidatePath.StartsWith("\\"))) {
-        Write-Host "[!] Please enter an absolute Windows path (for example C:\ComfyUI_Models)." -ForegroundColor Yellow
-        continue
-    }
-
-    if ((Test-Path -Path $candidatePath) -and -not (Test-Path -Path $candidatePath -PathType Container)) {
-        Write-Host "[!] '$candidatePath' exists but is not a directory." -ForegroundColor Yellow
-        continue
-    }
-
-    $extraModelBasePath = $candidatePath
-    break
-}
+$extraModelBasePath = Read-OptionalAbsoluteWindowsPath -Prompt "Enter extra model search path (e.g. C:\ComfyUI_Models). Leave blank to skip"
 
 if (-not [string]::IsNullOrWhiteSpace($extraModelBasePath)) {
     $requiredExtraModelSubfolders = @(
@@ -650,7 +693,7 @@ comfyui:
     }
 
     $extraModelPathsConfigured = $true
-    Write-Host "[√] Created extra_model_paths.yaml using shared model path '$resolvedExtraModelBasePath'." -ForegroundColor Green
+    Write-Host "[✓] Created extra_model_paths.yaml using shared model path '$resolvedExtraModelBasePath'." -ForegroundColor Green
 } else {
     Write-Host "[i] Skipped extra model search path setup."
 }
