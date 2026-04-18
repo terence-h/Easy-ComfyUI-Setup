@@ -4,6 +4,19 @@ function Refresh-PathEnvironment {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
+function Invoke-OrExit {
+    param(
+        [scriptblock]$Action,
+        [string]$ErrorMessage
+    )
+
+    & $Action
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[X] $ErrorMessage" -ForegroundColor Red
+        exit 1
+    }
+}
+
 function Read-NumberSelection {
     param(
         [string]$Prompt,
@@ -17,6 +30,30 @@ function Read-NumberSelection {
         }
 
         Write-Host "[!] Invalid choice. Enter one of: $($ValidChoices -join ', ')." -ForegroundColor Yellow
+    }
+}
+
+function Read-YesNo {
+    param(
+        [string]$Prompt,
+        [bool]$DefaultYes = $false
+    )
+
+    $defaultLabel = if ($DefaultYes) { "Y" } else { "N" }
+
+    while ($true) {
+        $rawInput = (Read-Host "$Prompt Enter Y or N (default $defaultLabel)").Trim()
+        if ([string]::IsNullOrWhiteSpace($rawInput)) {
+            return $DefaultYes
+        }
+        if ($rawInput.Equals("Y", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        if ($rawInput.Equals("N", [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $false
+        }
+
+        Write-Host "[!] Invalid choice. Enter Y or N." -ForegroundColor Yellow
     }
 }
 
@@ -100,6 +137,54 @@ function Read-OptionalAbsoluteWindowsPath {
     }
 }
 
+function Get-NormalizedVersionTag {
+    param([string]$Version)
+
+    $normalized = $Version
+    if ($normalized.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
+        $normalized = $normalized.Substring(1)
+    }
+
+    return "v$normalized"
+}
+
+function Install-WingetTool {
+    param(
+        [string]$Name,
+        [string]$WingetId,
+        [string]$CommandToVerify
+    )
+
+    if (Get-Command $CommandToVerify -ErrorAction SilentlyContinue) {
+        Write-Host "[✓] $Name is already installed." -ForegroundColor Green
+        return
+    }
+
+    Write-Host "[!] $Name was not found." -ForegroundColor Yellow
+    Write-Host "1. Yes - install $Name via Winget"
+    Write-Host "2. No - do not install (setup will exit)"
+    $choice = Read-NumberSelection -Prompt "Install $Name now? Enter 1 or 2" -ValidChoices @("1", "2")
+
+    if ($choice -ne "1") {
+        Write-Host "[X] You chose not to install $Name. Setup will exit." -ForegroundColor Red
+        exit 1
+    }
+
+    winget install --id $WingetId -e --source winget
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[X] $Name installation failed." -ForegroundColor Red
+        exit 1
+    }
+
+    Refresh-PathEnvironment
+    if (-not (Get-Command $CommandToVerify -ErrorAction SilentlyContinue)) {
+        Write-Host "[X] $Name is still not available after installation." -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "[✓] $Name installed successfully." -ForegroundColor Green
+}
+
 function Exit-UnsupportedCuda {
     param(
         [string]$Reason
@@ -110,7 +195,7 @@ function Exit-UnsupportedCuda {
     exit 1
 }
 
-Write-Host "=== Easy ComfyUI Setup v1.0.3 ===" -ForegroundColor Cyan
+Write-Host "=== Easy ComfyUI Setup v1.0.4 ===" -ForegroundColor Cyan
 Write-Host "--- Part 1: Detecting CUDA Version ---" -ForegroundColor Cyan
 
 if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
@@ -130,92 +215,63 @@ if (-not $cudaVersionMatch) {
 $detectedCudaVersion = $cudaVersionMatch.Matches[0].Groups[1].Value
 Write-Host "[i] Detected CUDA version: $detectedCudaVersion" -ForegroundColor Green
 
-$torchIndexUrl = $null
-$cudaInstallLabel = $null
-$installSageAttention = $false
-$installFlashAttention = $false
-$sageAttentionWheelUrl = $null
 $sageAttentionWheelUrlCu128 = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
 $sageAttentionWheelUrlCu130 = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu130torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
 $flashAttentionWheelUrl = "https://huggingface.co/ussoewwin/Flash-Attention-2_for_Windows/resolve/main/flash_attn-2.8.3%2Bcu130torch2.10.0cxx11abiTRUE-cp312-cp312-win_amd64.whl"
 
-if ($detectedCudaVersion -eq "12.6") {
-    $torchIndexUrl = "https://download.pytorch.org/whl/cu126"
-    $cudaInstallLabel = "12.6"
-    Write-Host "[!] CUDA 12.6 detected: FlashAttention 2 and SageAttention 2 will not be installed." -ForegroundColor Yellow
-} elseif ($detectedCudaVersion -eq "12.8") {
-    $torchIndexUrl = "https://download.pytorch.org/whl/cu128"
-    $cudaInstallLabel = "12.8"
-    $installSageAttention = $true
-    $sageAttentionWheelUrl = $sageAttentionWheelUrlCu128
-    Write-Host "[!] CUDA 12.8 detected: FlashAttention 2 will not be installed." -ForegroundColor Yellow
-} elseif ($detectedCudaVersion -like "13.*" -or $detectedCudaVersion -eq "13") {
-    $torchIndexUrl = "https://download.pytorch.org/whl/cu130"
-    $cudaInstallLabel = "13.x"
-    $installSageAttention = $true
-    $installFlashAttention = $true
-    $sageAttentionWheelUrl = $sageAttentionWheelUrlCu130
-} else {
+$cudaProfiles = @{
+    "12.6" = @{
+        TorchIndexUrl   = "https://download.pytorch.org/whl/cu126"
+        InstallLabel    = "12.6"
+        SageAttention   = $false
+        SageWheelUrl    = $null
+        FlashAttention  = $false
+        Note            = "[!] CUDA 12.6 detected: FlashAttention 2 and SageAttention 2 will not be installed."
+    }
+    "12.8" = @{
+        TorchIndexUrl   = "https://download.pytorch.org/whl/cu128"
+        InstallLabel    = "12.8"
+        SageAttention   = $true
+        SageWheelUrl    = $sageAttentionWheelUrlCu128
+        FlashAttention  = $false
+        Note            = "[!] CUDA 12.8 detected: FlashAttention 2 will not be installed."
+    }
+    "13"   = @{
+        TorchIndexUrl   = "https://download.pytorch.org/whl/cu130"
+        InstallLabel    = "13.x"
+        SageAttention   = $true
+        SageWheelUrl    = $sageAttentionWheelUrlCu130
+        FlashAttention  = $true
+        Note            = $null
+    }
+}
+
+$profileKey = $null
+if ($cudaProfiles.ContainsKey($detectedCudaVersion)) {
+    $profileKey = $detectedCudaVersion
+} elseif ($detectedCudaVersion -like "13.*") {
+    $profileKey = "13"
+}
+
+if (-not $profileKey) {
     Exit-UnsupportedCuda -Reason "Unsupported CUDA version '$detectedCudaVersion'."
+}
+
+$cudaProfile = $cudaProfiles[$profileKey]
+$torchIndexUrl = $cudaProfile.TorchIndexUrl
+$cudaInstallLabel = $cudaProfile.InstallLabel
+$installSageAttention = $cudaProfile.SageAttention
+$installFlashAttention = $cudaProfile.FlashAttention
+$sageAttentionWheelUrl = $cudaProfile.SageWheelUrl
+
+if ($cudaProfile.Note) {
+    Write-Host $cudaProfile.Note -ForegroundColor Yellow
 }
 
 Write-Host "--- Part 2: Checking/Installing Prerequisites ---" -ForegroundColor Cyan
 
-if (Get-Command git -ErrorAction SilentlyContinue) {
-    Write-Host "[✓] Git is already installed." -ForegroundColor Green
-} else {
-    Write-Host "[!] Git was not found." -ForegroundColor Yellow
-    Write-Host "1. Yes - install Git via Winget"
-    Write-Host "2. No - do not install (setup will exit)"
-    $gitInstallChoice = Read-NumberSelection -Prompt "Install Git now? Enter 1 or 2" -ValidChoices @("1", "2")
-
-    if ($gitInstallChoice -eq "1") {
-        winget install --id Git.Git -e --source winget
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[X] Git installation failed." -ForegroundColor Red
-            exit 1
-        }
-
-        Refresh-PathEnvironment
-        if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
-            Write-Host "[X] Git is still not available after installation." -ForegroundColor Red
-            exit 1
-        }
-
-        Write-Host "[✓] Git installed successfully." -ForegroundColor Green
-    } else {
-        Write-Host "[X] You chose not to install Git. Setup will exit." -ForegroundColor Red
-        exit 1
-    }
-}
-
-if (Get-Command uv -ErrorAction SilentlyContinue) {
-    Write-Host "[✓] uv is already installed." -ForegroundColor Green
-} else {
-    Write-Host "[!] uv was not found." -ForegroundColor Yellow
-    Write-Host "1. Yes - install uv via Winget"
-    Write-Host "2. No - do not install (setup will exit)"
-    $uvInstallChoice = Read-NumberSelection -Prompt "Install uv now? Enter 1 or 2" -ValidChoices @("1", "2")
-
-    if ($uvInstallChoice -eq "1") {
-        winget install --id astral-sh.uv -e --source winget
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "[X] uv installation failed." -ForegroundColor Red
-            exit 1
-        }
-
-        Refresh-PathEnvironment
-        if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-            Write-Host "[X] uv is still not available after installation." -ForegroundColor Red
-            exit 1
-        }
-
-        Write-Host "[✓] uv installed successfully." -ForegroundColor Green
-    } else {
-        Write-Host "[X] You chose not to install uv. Setup will exit." -ForegroundColor Red
-        exit 1
-    }
-}
+Install-WingetTool -Name "Git" -WingetId "Git.Git" -CommandToVerify "git"
+Install-WingetTool -Name "uv"  -WingetId "astral-sh.uv" -CommandToVerify "uv"
 
 Refresh-PathEnvironment
 
@@ -233,18 +289,10 @@ $versionInput = Read-Host "Enter ComfyUI version tag (e.g. 0.0.2 or v0.18.3). Le
 $versionInput = $versionInput.Trim()
 
 if ([string]::IsNullOrWhiteSpace($versionInput)) {
-    git clone $repoUrl $comfyUiFolderName
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to clone repository." -ForegroundColor Red
-        exit 1
-    }
+    Invoke-OrExit -Action { git clone $repoUrl $comfyUiFolderName } -ErrorMessage "Failed to clone repository."
 } else {
-    $normalizedVersion = $versionInput
-    if ($normalizedVersion.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $normalizedVersion = $normalizedVersion.Substring(1)
-    }
+    $targetTag = Get-NormalizedVersionTag -Version $versionInput
 
-    $targetTag = "v$normalizedVersion"
     $remoteTags = git ls-remote --tags $repoUrl
     if ($LASTEXITCODE -ne 0) {
         Write-Host "[X] Failed to query remote tags from '$repoUrl'." -ForegroundColor Red
@@ -258,69 +306,37 @@ if ([string]::IsNullOrWhiteSpace($versionInput)) {
         exit 1
     }
 
-    git clone --branch $targetTag --single-branch $repoUrl $comfyUiFolderName
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to clone repository at tag '$targetTag'." -ForegroundColor Red
-        exit 1
-    }
+    Invoke-OrExit -Action { git clone --branch $targetTag --single-branch $repoUrl $comfyUiFolderName } -ErrorMessage "Failed to clone repository at tag '$targetTag'."
 }
 
 Set-Location -Path $comfyUiFolderPath
 
 Write-Host "--- Part 4: Setting Up Virtual Environment ---" -ForegroundColor Cyan
-uv venv --python 3.12
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[X] Failed to create virtual environment." -ForegroundColor Red
-    exit 1
-}
+Invoke-OrExit -Action { uv venv --python 3.12 } -ErrorMessage "Failed to create virtual environment."
 
 Write-Host "--- Part 5: Installing Heavy Dependencies (Torch/CUDA $cudaInstallLabel) ---" -ForegroundColor Cyan
-uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url $torchIndexUrl
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[X] Failed to install torch packages for CUDA $cudaInstallLabel." -ForegroundColor Red
-    exit 1
-}
+Invoke-OrExit -Action { uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url $torchIndexUrl } -ErrorMessage "Failed to install torch packages for CUDA $cudaInstallLabel."
 
 Write-Host "--- Part 6: Installing Requirements ---" -ForegroundColor Cyan
-uv pip install -r requirements.txt
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[X] Failed to install requirements.txt." -ForegroundColor Red
-    exit 1
-}
+Invoke-OrExit -Action { uv pip install -r requirements.txt } -ErrorMessage "Failed to install requirements.txt."
 
 if (Test-Path "manager_requirements.txt") {
-    uv pip install -r manager_requirements.txt
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to install manager_requirements.txt." -ForegroundColor Red
-        exit 1
-    }
+    Invoke-OrExit -Action { uv pip install -r manager_requirements.txt } -ErrorMessage "Failed to install manager_requirements.txt."
 }
 
 Write-Host "--- Part 7: Installing Triton and CUDA-Specific Attention Packages ---" -ForegroundColor Cyan
-uv pip install -U "triton-windows<3.7"
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[X] Failed to install triton-windows." -ForegroundColor Red
-    exit 1
-}
+Invoke-OrExit -Action { uv pip install -U "triton-windows<3.7" } -ErrorMessage "Failed to install triton-windows."
 
 $flashAttentionInstalled = $false
 $sageAttentionInstalled = $false
 
 if ($installSageAttention -and -not [string]::IsNullOrWhiteSpace($sageAttentionWheelUrl)) {
-    uv pip install $sageAttentionWheelUrl
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to install SageAttention 2." -ForegroundColor Red
-        exit 1
-    }
+    Invoke-OrExit -Action { uv pip install $sageAttentionWheelUrl } -ErrorMessage "Failed to install SageAttention 2."
     $sageAttentionInstalled = $true
 }
 
 if ($installFlashAttention) {
-    uv pip install $flashAttentionWheelUrl
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to install FlashAttention 2." -ForegroundColor Red
-        exit 1
-    }
+    Invoke-OrExit -Action { uv pip install $flashAttentionWheelUrl } -ErrorMessage "Failed to install FlashAttention 2."
     $flashAttentionInstalled = $true
 }
 
@@ -347,7 +363,7 @@ if ($flashAttentionInstalled -or $sageAttentionInstalled) {
     if ($sageAttentionInstalled) {
 		Write-Host "[i] SageAttention can be manually enabled per workflow by using ComfyUI-KJNodes's Patch Sage Attention KJ node." -ForegroundColor Yellow
 		Write-Host "[i] It is recommended to use PyTorch attention by default and patch SageAttention when you need it" -ForegroundColor Yellow
-		
+
         $attentionChoices += [PSCustomObject]@{
             Key = ($attentionChoices.Count + 1).ToString()
             Label = "SageAttention"
@@ -365,20 +381,7 @@ if ($flashAttentionInstalled -or $sageAttentionInstalled) {
     $defaultAttentionArg = $selectedAttention.Arg
 }
 
-$disableDynamicVram = $false
-while ($true) {
-    $disableDynamicVramInput = (Read-Host "Disable dynamic VRAM? Enter Y or N (default N)").Trim()
-    if ([string]::IsNullOrWhiteSpace($disableDynamicVramInput) -or $disableDynamicVramInput.Equals("N", [System.StringComparison]::OrdinalIgnoreCase)) {
-        break
-    }
-
-    if ($disableDynamicVramInput.Equals("Y", [System.StringComparison]::OrdinalIgnoreCase)) {
-        $disableDynamicVram = $true
-        break
-    }
-
-    Write-Host "[!] Invalid choice. Enter Y or N." -ForegroundColor Yellow
-}
+$disableDynamicVram = Read-YesNo -Prompt "Disable dynamic VRAM?"
 
 Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared output directory so installs can save generated output at a centralised location." -ForegroundColor Yellow
 $outputDirectoryArgPath = Read-OptionalAbsoluteWindowsPath -Prompt "Enter output directory for generated items (e.g. D:\ComfyUI_Output). Leave blank to keep default"
