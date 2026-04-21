@@ -156,7 +156,7 @@ function Install-WingetTool {
     )
 
     if (Get-Command $CommandToVerify -ErrorAction SilentlyContinue) {
-        Write-Host "[✓] $Name is already installed." -ForegroundColor Green
+        Write-Host "[OK] $Name is already installed." -ForegroundColor Green
         return
     }
 
@@ -182,7 +182,7 @@ function Install-WingetTool {
         exit 1
     }
 
-    Write-Host "[✓] $Name installed successfully." -ForegroundColor Green
+    Write-Host "[OK] $Name installed successfully." -ForegroundColor Green
 }
 
 function Exit-UnsupportedCuda {
@@ -586,7 +586,7 @@ if "!INSTALL_FLASH!"=="1" (
     if errorlevel 1 goto :install_failed
 )
 
-echo [✓] Reinstall completed.
+echo [OK] Reinstall completed.
 pause
 exit /b 0
 
@@ -597,7 +597,7 @@ exit /b 1
 "@
 $reinstallTorchCudaTritonSageAttnFlashAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn_flashattn.bat" -Encoding ascii
 
-Write-Host "[✓] All scripts created successfully." -ForegroundColor Green
+Write-Host "[OK] All scripts created successfully." -ForegroundColor Green
 
 Write-Host "--- Part 10: Optional Shared Model Search Path ---" -ForegroundColor Cyan
 Write-Host "[i] Recommended for multiple ComfyUI installations: use a shared model directory so installs can reuse one model library and avoid duplicate models." -ForegroundColor Yellow
@@ -696,7 +696,7 @@ comfyui:
     }
 
     $extraModelPathsConfigured = $true
-    Write-Host "[✓] Created extra_model_paths.yaml using shared model path '$resolvedExtraModelBasePath'." -ForegroundColor Green
+    Write-Host "[OK] Created extra_model_paths.yaml using shared model path '$resolvedExtraModelBasePath'." -ForegroundColor Green
 } else {
     Write-Host "[i] Skipped extra model search path setup."
 }
