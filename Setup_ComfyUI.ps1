@@ -191,11 +191,11 @@ function Exit-UnsupportedCuda {
     )
 
     Write-Host "[X] $Reason" -ForegroundColor Red
-    Read-Host "Please upgrade CUDA to 12.6, 12.8, or 13.x and press Enter to exit"
+    Read-Host "Please upgrade CUDA to 13.0 or newer and press Enter to exit"
     exit 1
 }
 
-Write-Host "=== Easy ComfyUI Setup v1.0.4 ===" -ForegroundColor Cyan
+Write-Host "=== Easy ComfyUI Setup v1.0.5 ===" -ForegroundColor Cyan
 Write-Host "--- Part 1: Detecting CUDA Version ---" -ForegroundColor Cyan
 
 if (-not (Get-Command nvidia-smi -ErrorAction SilentlyContinue)) {
@@ -215,57 +215,24 @@ if (-not $cudaVersionMatch) {
 $detectedCudaVersion = $cudaVersionMatch.Matches[0].Groups[1].Value
 Write-Host "[i] Detected CUDA version: $detectedCudaVersion" -ForegroundColor Green
 
-$sageAttentionWheelUrlCu128 = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
-$sageAttentionWheelUrlCu130 = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu130torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
-$flashAttentionWheelUrl = "https://huggingface.co/ussoewwin/Flash-Attention-2_for_Windows/resolve/main/flash_attn-2.8.3%2Bcu130torch2.10.0cxx11abiTRUE-cp312-cp312-win_amd64.whl"
+$sageAttentionWheelUrl = "https://github.com/terence-h/Easy-ComfyUI-Setup/raw/refs/heads/master/sageattention-2.2.0+cu130torch2.12.0-cp312-cp312-win_amd64.whl"
 
-$cudaProfiles = @{
-    "12.6" = @{
-        TorchIndexUrl   = "https://download.pytorch.org/whl/cu126"
-        InstallLabel    = "12.6"
-        SageAttention   = $false
-        SageWheelUrl    = $null
-        FlashAttention  = $false
-        Note            = "[!] CUDA 12.6 detected: FlashAttention 2 and SageAttention 2 will not be installed."
-    }
-    "12.8" = @{
-        TorchIndexUrl   = "https://download.pytorch.org/whl/cu128"
-        InstallLabel    = "12.8"
-        SageAttention   = $true
-        SageWheelUrl    = $sageAttentionWheelUrlCu128
-        FlashAttention  = $false
-        Note            = "[!] CUDA 12.8 detected: FlashAttention 2 will not be installed."
-    }
-    "13"   = @{
-        TorchIndexUrl   = "https://download.pytorch.org/whl/cu130"
-        InstallLabel    = "13.x"
-        SageAttention   = $true
-        SageWheelUrl    = $sageAttentionWheelUrlCu130
-        FlashAttention  = $true
-        Note            = $null
-    }
+$cudaVersionParts = $detectedCudaVersion.Split('.')
+$cudaMajor = [int]$cudaVersionParts[0]
+$cudaMinor = if ($cudaVersionParts.Count -ge 2) { [int]$cudaVersionParts[1] } else { 0 }
+
+if ($cudaMajor -lt 13) {
+    Exit-UnsupportedCuda -Reason "Detected CUDA $detectedCudaVersion. CUDA 13.0 or newer is required."
 }
 
-$profileKey = $null
-if ($cudaProfiles.ContainsKey($detectedCudaVersion)) {
-    $profileKey = $detectedCudaVersion
-} elseif ($detectedCudaVersion -like "13.*") {
-    $profileKey = "13"
-}
-
-if (-not $profileKey) {
-    Exit-UnsupportedCuda -Reason "Unsupported CUDA version '$detectedCudaVersion'."
-}
-
-$cudaProfile = $cudaProfiles[$profileKey]
-$torchIndexUrl = $cudaProfile.TorchIndexUrl
-$cudaInstallLabel = $cudaProfile.InstallLabel
-$installSageAttention = $cudaProfile.SageAttention
-$installFlashAttention = $cudaProfile.FlashAttention
-$sageAttentionWheelUrl = $cudaProfile.SageWheelUrl
-
-if ($cudaProfile.Note) {
-    Write-Host $cudaProfile.Note -ForegroundColor Yellow
+if ($cudaMajor -eq 13 -and $cudaMinor -le 1) {
+    $cudaInstallLabel   = "13.0/13.1 (cu130)"
+    $torchIndexUrl      = "https://download.pytorch.org/whl/cu130"
+    $torchaudioIndexUrl = $null
+} else {
+    $cudaInstallLabel   = "13.2+ (cu132)"
+    $torchIndexUrl      = "https://download.pytorch.org/whl/cu132"
+    $torchaudioIndexUrl = "https://download.pytorch.org/whl/test/cu132"
 }
 
 Write-Host "--- Part 2: Checking/Installing Prerequisites ---" -ForegroundColor Cyan
@@ -315,7 +282,12 @@ Write-Host "--- Part 4: Setting Up Virtual Environment ---" -ForegroundColor Cya
 Invoke-OrExit -Action { uv venv --python 3.12 } -ErrorMessage "Failed to create virtual environment."
 
 Write-Host "--- Part 5: Installing Heavy Dependencies (Torch/CUDA $cudaInstallLabel) ---" -ForegroundColor Cyan
-Invoke-OrExit -Action { uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url $torchIndexUrl } -ErrorMessage "Failed to install torch packages for CUDA $cudaInstallLabel."
+if ($null -eq $torchaudioIndexUrl) {
+    Invoke-OrExit -Action { uv pip install torch==2.12.0 torchvision==0.27.0 torchaudio==2.11.0 --index-url $torchIndexUrl } -ErrorMessage "Failed to install torch packages for CUDA $cudaInstallLabel."
+} else {
+    Invoke-OrExit -Action { uv pip install torch==2.12.0 torchvision==0.27.0 --index-url $torchIndexUrl } -ErrorMessage "Failed to install torch/torchvision for CUDA $cudaInstallLabel."
+    Invoke-OrExit -Action { uv pip install torchaudio==2.11.0 --index-url $torchaudioIndexUrl } -ErrorMessage "Failed to install torchaudio for CUDA $cudaInstallLabel."
+}
 
 Write-Host "--- Part 6: Installing Requirements ---" -ForegroundColor Cyan
 Invoke-OrExit -Action { uv pip install -r requirements.txt } -ErrorMessage "Failed to install requirements.txt."
@@ -324,62 +296,36 @@ if (Test-Path "manager_requirements.txt") {
     Invoke-OrExit -Action { uv pip install -r manager_requirements.txt } -ErrorMessage "Failed to install manager_requirements.txt."
 }
 
-Write-Host "--- Part 7: Installing Triton and CUDA-Specific Attention Packages ---" -ForegroundColor Cyan
-Invoke-OrExit -Action { uv pip install -U "triton-windows<3.7" } -ErrorMessage "Failed to install triton-windows."
+Write-Host "--- Part 7: Installing Triton and SageAttention ---" -ForegroundColor Cyan
+Invoke-OrExit -Action { uv pip install -U "triton-windows<3.8" } -ErrorMessage "Failed to install triton-windows."
 
-$flashAttentionInstalled = $false
-$sageAttentionInstalled = $false
+Invoke-OrExit -Action { uv pip install $sageAttentionWheelUrl } -ErrorMessage "Failed to install SageAttention 2."
 
-if ($installSageAttention -and -not [string]::IsNullOrWhiteSpace($sageAttentionWheelUrl)) {
-    Invoke-OrExit -Action { uv pip install $sageAttentionWheelUrl } -ErrorMessage "Failed to install SageAttention 2."
-    $sageAttentionInstalled = $true
+Write-Host "--- Part 8: Selecting Default Attention Backend ---" -ForegroundColor Cyan
+Write-Host "[i] SageAttention can be manually enabled per workflow by using ComfyUI-KJNodes's Patch Sage Attention KJ node." -ForegroundColor Yellow
+Write-Host "[i] It is recommended to use PyTorch attention by default and patch SageAttention when you need it" -ForegroundColor Yellow
+
+$attentionChoices = @(
+    [PSCustomObject]@{
+        Key = "1"
+        Label = "PyTorch attention (Recommended)"
+        Arg = ""
+    },
+    [PSCustomObject]@{
+        Key = "2"
+        Label = "SageAttention"
+        Arg = "--use-sage-attention"
+    }
+)
+
+foreach ($choice in $attentionChoices) {
+    Write-Host "$($choice.Key). $($choice.Label)"
 }
 
-if ($installFlashAttention) {
-    Invoke-OrExit -Action { uv pip install $flashAttentionWheelUrl } -ErrorMessage "Failed to install FlashAttention 2."
-    $flashAttentionInstalled = $true
-}
-
-$defaultAttentionArg = ""
-if ($flashAttentionInstalled -or $sageAttentionInstalled) {
-    Write-Host "--- Part 8: Selecting Default Attention Backend ---" -ForegroundColor Cyan
-
-    $attentionChoices = @(
-        [PSCustomObject]@{
-            Key = "1"
-            Label = "PyTorch attention (Recommended)"
-            Arg = ""
-        }
-    )
-
-    if ($flashAttentionInstalled) {
-        $attentionChoices += [PSCustomObject]@{
-            Key = ($attentionChoices.Count + 1).ToString()
-            Label = "FlashAttention"
-            Arg = "--use-flash-attention"
-        }
-    }
-
-    if ($sageAttentionInstalled) {
-		Write-Host "[i] SageAttention can be manually enabled per workflow by using ComfyUI-KJNodes's Patch Sage Attention KJ node." -ForegroundColor Yellow
-		Write-Host "[i] It is recommended to use PyTorch attention by default and patch SageAttention when you need it" -ForegroundColor Yellow
-
-        $attentionChoices += [PSCustomObject]@{
-            Key = ($attentionChoices.Count + 1).ToString()
-            Label = "SageAttention"
-            Arg = "--use-sage-attention"
-        }
-    }
-
-    foreach ($choice in $attentionChoices) {
-        Write-Host "$($choice.Key). $($choice.Label)"
-    }
-
-    $attentionKeys = $attentionChoices | ForEach-Object { $_.Key }
-    $selectedAttentionKey = Read-NumberSelection -Prompt "Select default attention backend" -ValidChoices $attentionKeys
-    $selectedAttention = $attentionChoices | Where-Object { $_.Key -eq $selectedAttentionKey } | Select-Object -First 1
-    $defaultAttentionArg = $selectedAttention.Arg
-}
+$attentionKeys = $attentionChoices | ForEach-Object { $_.Key }
+$selectedAttentionKey = Read-NumberSelection -Prompt "Select default attention backend" -ValidChoices $attentionKeys
+$selectedAttention = $attentionChoices | Where-Object { $_.Key -eq $selectedAttentionKey } | Select-Object -First 1
+$defaultAttentionArg = $selectedAttention.Arg
 
 $disableDynamicVram = Read-YesNo -Prompt "Disable dynamic VRAM?"
 
@@ -419,7 +365,6 @@ python main.py --enable-manager $startCommandArgs
 REM --output-directory "D:\ComfyUI_Output"
 REM --input-directory "D:\ComfyUI_Input"
 REM --use-sage-attention
-REM --use-flash-attention
 REM --disable-dynamic-vram
 REM --front-end-version Comfy-Org/ComfyUI_frontend@1.39.19
 "@
@@ -495,8 +440,8 @@ pause
 "@
 $switchComfyUiVersionContent | Out-File -FilePath "switch_comfyui_version.bat" -Encoding ascii
 
-# 5. reinstall_torchcuda_triton_sageattn_flashattn.bat
-$reinstallTorchCudaTritonSageAttnFlashAttnContent = @"
+# 5. reinstall_torchcuda_triton_sageattn.bat
+$reinstallTorchCudaTritonSageAttnContent = @"
 @echo off
 setlocal EnableDelayedExpansion
 cd /d %~dp0
@@ -504,7 +449,7 @@ cd /d %~dp0
 where nvidia-smi >nul 2>nul
 if errorlevel 1 (
     echo [X] nvidia-smi was not found. CUDA version could not be detected.
-    echo Please upgrade CUDA to 12.6, 12.8, or 13.x, then rerun this script.
+    echo Please upgrade CUDA to 13.0 or newer, then rerun this script.
     pause
     exit /b 1
 )
@@ -518,7 +463,7 @@ for /f "tokens=3 delims=:|" %%A in ('nvidia-smi ^| findstr /C:"CUDA Version"') d
 :cuda_detected
 if "!CUDA_VERSION_RAW!"=="" (
     echo [X] Could not parse CUDA version from nvidia-smi output.
-    echo Please upgrade CUDA to 12.6, 12.8, or 13.x, then rerun this script.
+    echo Please upgrade CUDA to 13.0 or newer, then rerun this script.
     pause
     exit /b 1
 )
@@ -526,65 +471,48 @@ if "!CUDA_VERSION_RAW!"=="" (
 set "CUDA_VERSION=!CUDA_VERSION_RAW: =!"
 echo [i] Detected CUDA version: !CUDA_VERSION!
 
-set "TORCH_INDEX_URL="
-set "INSTALL_SAGE=0"
-set "INSTALL_FLASH=0"
-set "SAGE_WHEEL_URL="
-set "FLASH_WHEEL_URL=https://huggingface.co/ussoewwin/Flash-Attention-2_for_Windows/resolve/main/flash_attn-2.8.3%%2Bcu130torch2.10.0cxx11abiTRUE-cp312-cp312-win_amd64.whl"
+for /f "tokens=1,2 delims=." %%a in ("!CUDA_VERSION!") do (
+    set "CUDA_MAJOR=%%a"
+    set "CUDA_MINOR=%%b"
+)
+if "!CUDA_MINOR!"=="" set "CUDA_MINOR=0"
 
-if "!CUDA_VERSION!"=="12.6" (
-    set "TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126"
-    echo [!] CUDA 12.6 detected: FlashAttention 2 and SageAttention 2 are not available and will be skipped.
-    goto :install_packages
+if !CUDA_MAJOR! LSS 13 (
+    echo [X] Detected CUDA !CUDA_VERSION!. CUDA 13.0 or newer is required.
+    pause
+    exit /b 1
 )
 
-if "!CUDA_VERSION!"=="12.8" (
-    set "TORCH_INDEX_URL=https://download.pytorch.org/whl/cu128"
-    set "INSTALL_SAGE=1"
-    set "SAGE_WHEEL_URL=https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
-    echo [!] CUDA 12.8 detected: FlashAttention 2 is not available and will be skipped.
-    goto :install_packages
-)
+set "SAGE_WHEEL_URL=https://github.com/terence-h/Easy-ComfyUI-Setup/raw/refs/heads/master/sageattention-2.2.0+cu130torch2.12.0-cp312-cp312-win_amd64.whl"
+set "TORCHAUDIO_INDEX_URL="
+set "USE_CU132=0"
+if !CUDA_MAJOR! GTR 13 set "USE_CU132=1"
+if !CUDA_MAJOR! EQU 13 if !CUDA_MINOR! GEQ 2 set "USE_CU132=1"
 
-if "!CUDA_VERSION:~0,3!"=="13." (
+if "!USE_CU132!"=="1" (
+    set "TORCH_INDEX_URL=https://download.pytorch.org/whl/cu132"
+    set "TORCHAUDIO_INDEX_URL=https://download.pytorch.org/whl/test/cu132"
+) else (
     set "TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130"
-    set "INSTALL_SAGE=1"
-    set "INSTALL_FLASH=1"
-    set "SAGE_WHEEL_URL=https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu130torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
-    goto :install_packages
 )
 
-if "!CUDA_VERSION:~0,2!"=="13" (
-    set "TORCH_INDEX_URL=https://download.pytorch.org/whl/cu130"
-    set "INSTALL_SAGE=1"
-    set "INSTALL_FLASH=1"
-    set "SAGE_WHEEL_URL=https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu130torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl"
-    goto :install_packages
-)
-
-echo [X] Unsupported CUDA version "!CUDA_VERSION!".
-echo Please upgrade CUDA to 12.6, 12.8, or 13.x, then rerun this script.
-pause
-exit /b 1
-
-:install_packages
 call .venv\Scripts\activate.bat
 
-uv pip install torch==2.10.0 torchvision==0.25.0 torchaudio==2.10.0 --index-url !TORCH_INDEX_URL! --upgrade --force-reinstall --no-deps
-if errorlevel 1 goto :install_failed
-
-uv pip install -U "triton-windows<3.7" --upgrade --force-reinstall --no-deps
-if errorlevel 1 goto :install_failed
-
-if "!INSTALL_SAGE!"=="1" (
-    uv pip install "!SAGE_WHEEL_URL!" --upgrade --force-reinstall --no-deps
+if "!TORCHAUDIO_INDEX_URL!"=="" (
+    uv pip install torch==2.12.0 torchvision==0.27.0 torchaudio==2.11.0 --index-url !TORCH_INDEX_URL! --upgrade --force-reinstall --no-deps
+    if errorlevel 1 goto :install_failed
+) else (
+    uv pip install torch==2.12.0 torchvision==0.27.0 --index-url !TORCH_INDEX_URL! --upgrade --force-reinstall --no-deps
+    if errorlevel 1 goto :install_failed
+    uv pip install torchaudio==2.11.0 --index-url !TORCHAUDIO_INDEX_URL! --upgrade --force-reinstall --no-deps
     if errorlevel 1 goto :install_failed
 )
 
-if "!INSTALL_FLASH!"=="1" (
-    uv pip install "!FLASH_WHEEL_URL!" --upgrade --force-reinstall --no-deps
-    if errorlevel 1 goto :install_failed
-)
+uv pip install -U "triton-windows<3.8" --upgrade --force-reinstall --no-deps
+if errorlevel 1 goto :install_failed
+
+uv pip install "!SAGE_WHEEL_URL!" --upgrade --force-reinstall --no-deps
+if errorlevel 1 goto :install_failed
 
 echo [OK] Reinstall completed.
 pause
@@ -595,7 +523,7 @@ echo [X] Dependency installation failed.
 pause
 exit /b 1
 "@
-$reinstallTorchCudaTritonSageAttnFlashAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn_flashattn.bat" -Encoding ascii
+$reinstallTorchCudaTritonSageAttnContent | Out-File -FilePath "reinstall_torchcuda_triton_sageattn.bat" -Encoding ascii
 
 Write-Host "[OK] All scripts created successfully." -ForegroundColor Green
 
@@ -702,4 +630,4 @@ comfyui:
 }
 
 Write-Host "--- Setup Complete! ---" -ForegroundColor Green
-Write-Host "All scripts (start.bat, update_latest.bat, update_stable.bat, switch_comfyui_version.bat, reinstall_torchcuda_triton_sageattn_flashattn.bat) have been created in the '$comfyUiFolderName' folder. Run start.bat to start ComfyUI."
+Write-Host "All scripts (start.bat, update_latest.bat, update_stable.bat, switch_comfyui_version.bat, reinstall_torchcuda_triton_sageattn.bat) have been created in the '$comfyUiFolderName' folder. Run start.bat to start ComfyUI."
